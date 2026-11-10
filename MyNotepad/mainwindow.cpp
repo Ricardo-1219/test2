@@ -331,3 +331,119 @@ bool MainWindow::maybeSave()
     return false;
 }
 
+void MainWindow::showFindDialog()
+{
+    if (!m_findDialog) {
+        m_findDialog = new FindDialog(this);
+        connect(m_findDialog, &FindDialog::findRequested,
+                this, &MainWindow::findRequested);
+    }
+
+    QTextCursor cursor = m_editor->textCursor();
+    if (cursor.hasSelection() && cursor.selectedText().size() <= 100) {
+        m_findDialog->setFindText(cursor.selectedText());
+    }
+    m_findDialog->show();
+    m_findDialog->raise();
+    m_findDialog->activateWindow();
+}
+
+void MainWindow::showReplaceDialog()
+{
+    if (!m_replaceDialog) {
+        m_replaceDialog = new ReplaceDialog(this);
+        connect(m_replaceDialog, &ReplaceDialog::findRequested,
+                this, &MainWindow::findRequested);
+        connect(m_replaceDialog, &ReplaceDialog::replaceRequested,
+                this, &MainWindow::replaceRequested);
+        connect(m_replaceDialog, &ReplaceDialog::replaceAllRequested,
+                this, &MainWindow::replaceAllRequested);
+    }
+
+    QTextCursor cursor = m_editor->textCursor();
+    if (cursor.hasSelection() && cursor.selectedText().size() <= 100) {
+        m_replaceDialog->setFindText(cursor.selectedText());
+    }
+    m_replaceDialog->show();
+    m_replaceDialog->raise();
+    m_replaceDialog->activateWindow();
+}
+
+void MainWindow::showAboutDialog()
+{
+    if (!m_aboutDialog) {
+        m_aboutDialog = new AboutDialog(this);
+    }
+    m_aboutDialog->show();
+    m_aboutDialog->raise();
+    m_aboutDialog->activateWindow();
+}
+
+void MainWindow::chooseFont()
+{
+    bool accepted = false;
+    const QFont font = QFontDialog::getFont(
+        &accepted, m_editor->font(), this, tr("选择字体"));
+    if (accepted) {
+        m_editor->setFont(font);
+        ui->statusbar->showMessage(
+            tr("字体：%1，%2 pt").arg(font.family()).arg(font.pointSize()), 4000);
+    }
+}
+
+void MainWindow::chooseTextColor()
+{
+    const QColor color = QColorDialog::getColor(
+        m_editor->palette().color(QPalette::Text),
+        this,
+        tr("选择字体颜色"));
+    if (!color.isValid()) {
+        return;
+    }
+
+    QTextCharFormat format;
+    format.setForeground(color);
+    m_editor->mergeCurrentCharFormat(format);
+}
+
+void MainWindow::chooseTextBackgroundColor()
+{
+    const QColor color = QColorDialog::getColor(
+        Qt::yellow, this, tr("选择字体背景色"));
+    if (!color.isValid()) {
+        return;
+    }
+
+    QTextCharFormat format;
+    format.setBackground(color);
+    m_editor->mergeCurrentCharFormat(format);
+}
+
+void MainWindow::chooseEditorBackgroundColor()
+{
+    const QColor color = QColorDialog::getColor(
+        m_editor->viewport()->palette().color(QPalette::Base),
+        this,
+        tr("选择编辑器背景色"));
+    if (!color.isValid()) {
+        return;
+    }
+
+    QPalette palette = m_editor->palette();
+    palette.setColor(QPalette::Base, color);
+    palette.setColor(QPalette::Window, color);
+    m_editor->setPalette(palette);
+    m_editor->viewport()->setAutoFillBackground(true);
+}
+
+void MainWindow::setWordWrapEnabled(bool enabled)
+{
+    m_editor->setLineWrapMode(
+        enabled ? QPlainTextEdit::WidgetWidth : QPlainTextEdit::NoWrap);
+}
+
+void MainWindow::setLineNumbersEnabled(bool enabled)
+{
+    m_editor->setLineNumbersVisible(enabled);
+}
+
