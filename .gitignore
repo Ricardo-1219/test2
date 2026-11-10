@@ -1,0 +1,8 @@
+build/
+.deps/
+qa_source/
+tools/
+*.user
+*.pro.user
+*.autosave
+*.mp4
