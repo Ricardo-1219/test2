@@ -447,3 +447,162 @@ void MainWindow::setLineNumbersEnabled(bool enabled)
     m_editor->setLineNumbersVisible(enabled);
 }
 
+void MainWindow::findRequested(const QString &text,
+                               bool caseSensitive,
+                               bool backward)
+{
+    findNext(text, caseSensitive, backward, true);
+}
+
+bool MainWindow::findNext(const QString &text,
+                          bool caseSensitive,
+                          bool backward,
+                          bool showNotFound)
+{
+    if (text.isEmpty()) {
+        return false;
+    }
+
+    QTextDocument::FindFlags flags;
+    if (caseSensitive) {
+        flags |= QTextDocument::FindCaseSensitively;
+    }
+    if (backward) {
+        flags |= QTextDocument::FindBackward;
+    }
+
+    QTextCursor start = m_editor->textCursor();
+    if (start.hasSelection()) {
+        start.setPosition(
+            backward ? start.selectionStart() : start.selectionEnd());
+    }
+
+    QTextCursor found = m_editor->document()->find(text, start, flags);
+    if (found.isNull()) {
+        QTextCursor edge(m_editor->document());
+        edge.movePosition(backward ? QTextCursor::End
+                                   : QTextCursor::Start);
+        found = m_editor->document()->find(text, edge, flags);
+    }
+
+    if (found.isNull()) {
+        if (showNotFound) {
+            QMessageBox::information(
+                this,
+                tr("查找"),
+                tr("未找到“%1”。").arg(text));
+        }
+        return false;
+    }
+
+    m_editor->setTextCursor(found);
+    m_editor->ensureCursorVisible();
+    return true;
+}
+
+void MainWindow::replaceRequested(const QString &text,
+                                  const QString &replacement,
+                                  bool caseSensitive,
+                                  bool backward)
+{
+    replaceCurrent(text, replacement, caseSensitive, backward);
+}
+
+bool MainWindow::replaceCurrent(const QString &text,
+                                const QString &replacement,
+                                bool caseSensitive,
+                                bool backward)
+{
+    const QTextCursor current = m_editor->textCursor();
+    const Qt::CaseSensitivity sensitivity =
+        caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
+    const bool currentMatches =
+        current.hasSelection()
+        && current.selectedText().compare(text, sensitivity) == 0;
+
+    if (!currentMatches
+        && !findNext(text, caseSensitive, backward, true)) {
+        return false;
+    }
+
+    m_editor->textCursor().insertText(replacement);
+    return true;
+}
+
+int MainWindow::replaceAll(const QString &text,
+                           const QString &replacement,
+                           bool caseSensitive)
+{
+    if (text.isEmpty()) {
+        return 0;
+    }
+
+    QTextDocument::FindFlags flags;
+    if (caseSensitive) {
+        flags |= QTextDocument::FindCaseSensitively;
+    }
+
+    int count = 0;
+    QTextCursor cursor(m_editor->document());
+    cursor.movePosition(QTextCursor::Start);
+    cursor.beginEditBlock();
+    while (true) {
+        QTextCursor found = m_editor->document()->find(text, cursor, flags);
+        if (found.isNull()) {
+            break;
+        }
+        found.insertText(replacement);
+        cursor = found;
+        ++count;
+    }
+    cursor.endEditBlock();
+
+    if (count > 0) {
+        m_editor->setTextCursor(cursor);
+        m_editor->ensureCursorVisible();
+    }
+    return count;
+}
+
+void MainWindow::replaceAllRequested(const QString &text,
+                                     const QString &replacement,
+                                     bool caseSensitive)
+{
+    const int count = replaceAll(text, replacement, caseSensitive);
+    if (count == 0) {
+        QMessageBox::information(
+            this,
+            tr("替换"),
+            tr("未找到“%1”，没有执行替换。").arg(text));
+    } else {
+        QMessageBox::information(
+            this,
+            tr("替换"),
+            tr("已替换 %1 处。").arg(count));
+    }
+}
+
+void MainWindow::markDocumentModified()
+{
+    if (!m_modified) {
+        setModifiedState(true);
+    }
+    updateStatusBar();
+}
+
+void MainWindow::autoSave()
+{
+    if (m_currentFilePath.isEmpty() || !m_modified
+        || m_editor->isReadOnly()) {
+        return;
+    }
+
+    if (saveToFile(m_currentFilePath, false)) {
+        ui->statusbar->showMessage(
+            tr("已自动保存：%1").arg(QFileInfo(m_currentFilePath).fileName()),
+            3000);
+    } else {
+        ui->statusbar->showMessage(tr("自动保存失败，文件仍未保存。"), 5000);
+    }
+}
+
