@@ -606,3 +606,69 @@ void MainWindow::autoSave()
     }
 }
 
+void MainWindow::updateStatusBar()
+{
+    if (!m_lengthLabel || !m_editor) {
+        return;
+    }
+
+    const QString text = m_editor->toPlainText();
+    const QTextCursor cursor = m_editor->textCursor();
+    m_lengthLabel->setText(tr("长度: %1").arg(text.size()));
+    m_lineCountLabel->setText(tr("行数: %1").arg(m_editor->blockCount()));
+    m_cursorLabel->setText(
+        tr("行: %1  列: %2")
+            .arg(cursor.blockNumber() + 1)
+            .arg(cursor.positionInBlock() + 1));
+}
+
+void MainWindow::updateActionStates()
+{
+    const bool hasSelection = m_editor->textCursor().hasSelection();
+    ui->actionCut->setEnabled(hasSelection);
+    ui->actionCopy->setEnabled(hasSelection);
+    const QMimeData *mimeData = QApplication::clipboard()->mimeData();
+    ui->actionPaste->setEnabled(mimeData && mimeData->hasText());
+    ui->actionUndo->setEnabled(m_editor->document()->isUndoAvailable());
+    ui->actionRedo->setEnabled(m_editor->document()->isRedoAvailable());
+    ui->actionSave->setEnabled(
+        m_modified || (!m_editor->toPlainText().isEmpty()
+                       && m_currentFilePath.isEmpty()));
+}
+
+void MainWindow::updateWindowTitle()
+{
+    setWindowTitle(tr("%1[*] - 小牛文本编辑器").arg(displayFileName()));
+    setWindowModified(m_modified);
+}
+
+void MainWindow::setCurrentFile(const QString &filePath)
+{
+    m_currentFilePath = filePath;
+    updateWindowTitle();
+}
+
+void MainWindow::setModifiedState(bool modified)
+{
+    m_modified = modified;
+    m_editor->document()->setModified(modified);
+    setWindowModified(modified);
+    updateWindowTitle();
+    updateActionStates();
+}
+
+QString MainWindow::displayFileName() const
+{
+    return m_currentFilePath.isEmpty()
+        ? tr("未命名")
+        : QFileInfo(m_currentFilePath).fileName();
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    if (maybeSave()) {
+        event->accept();
+    } else {
+        event->ignore();
+    }
+}
