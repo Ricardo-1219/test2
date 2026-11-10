@@ -178,3 +178,156 @@ void MainWindow::createStatusBarWidgets()
     ui->statusbar->showMessage(QStringLiteral("就绪"), 3000);
 }
 
+void MainWindow::newFile()
+{
+    if (!maybeSave()) {
+        return;
+    }
+
+    const QSignalBlocker blocker(m_editor);
+    m_editor->clear();
+    setCurrentFile(QString());
+    setModifiedState(false);
+    updateStatusBar();
+    m_editor->setFocus();
+}
+
+bool MainWindow::openFile(const QString &filePath, bool showError)
+{
+    const QFileInfo fileInfo(filePath);
+    if (!fileInfo.exists() || !fileInfo.isFile()) {
+        if (showError) {
+            QMessageBox::warning(
+                this,
+                tr("打开失败"),
+                tr("文件不存在或不是一个普通文件：\n%1").arg(filePath));
+        }
+        return false;
+    }
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (showError) {
+            QMessageBox::warning(
+                this,
+                tr("打开失败"),
+                tr("无法读取文件：\n%1\n\n%2").arg(filePath, file.errorString()));
+        }
+        return false;
+    }
+
+    const QByteArray data = file.readAll();
+    file.close();
+    if (data.contains('\0')) {
+        if (showError) {
+            QMessageBox::warning(
+                this,
+                tr("打开失败"),
+                tr("该文件包含二进制数据，无法作为文本打开。"));
+        }
+        return false;
+    }
+
+    if (!maybeSave()) {
+        return false;
+    }
+
+    {
+        const QSignalBlocker blocker(m_editor);
+        m_editor->setPlainText(QString::fromUtf8(data));
+    }
+
+    setCurrentFile(filePath);
+    setModifiedState(false);
+    m_editor->moveCursor(QTextCursor::Start);
+    updateStatusBar();
+    ui->statusbar->showMessage(
+        tr("已打开：%1").arg(QFileInfo(filePath).fileName()), 4000);
+    return true;
+}
+
+bool MainWindow::saveFile()
+{
+    if (m_currentFilePath.isEmpty()) {
+        return saveFileAs();
+    }
+    return saveToFile(m_currentFilePath, true);
+}
+
+bool MainWindow::saveFileAs()
+{
+    QString suggestedName = m_currentFilePath;
+    if (suggestedName.isEmpty()) {
+        suggestedName = QStringLiteral("未命名.txt");
+    }
+
+    const QString filePath = QFileDialog::getSaveFileName(
+        this,
+        tr("另存为"),
+        suggestedName,
+        tr("文本文件 (*.txt);;所有文件 (*.*)"));
+    if (filePath.isEmpty()) {
+        return false;
+    }
+
+    return saveToFile(filePath, true);
+}
+
+bool MainWindow::saveToFile(const QString &filePath, bool showError)
+{
+    if (filePath.isEmpty()) {
+        return false;
+    }
+
+    const QByteArray data = m_editor->toPlainText().toUtf8();
+    QSaveFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        if (showError) {
+            QMessageBox::warning(
+                this,
+                tr("保存失败"),
+                tr("无法写入文件：\n%1\n\n%2").arg(filePath, file.errorString()));
+        }
+        return false;
+    }
+
+    const qint64 written = file.write(data);
+    if (written != data.size() || !file.commit()) {
+        if (showError) {
+            QMessageBox::warning(
+                this,
+                tr("保存失败"),
+                tr("文件写入不完整，请检查磁盘空间或目录权限。"));
+        }
+        return false;
+    }
+
+    setCurrentFile(filePath);
+    setModifiedState(false);
+    ui->statusbar->showMessage(
+        tr("已保存：%1").arg(QFileInfo(filePath).fileName()), 4000);
+    return true;
+}
+
+bool MainWindow::maybeSave()
+{
+    if (!m_modified) {
+        return true;
+    }
+
+    const QMessageBox::StandardButton result = QMessageBox::warning(
+        this,
+        tr("文件已修改"),
+        tr("“%1”有未保存的修改。是否保存？").arg(displayFileName()),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+        QMessageBox::Save);
+
+    if (result == QMessageBox::Save) {
+        return saveFile();
+    }
+    if (result == QMessageBox::Discard) {
+        return true;
+    }
+    return false;
+}
+
