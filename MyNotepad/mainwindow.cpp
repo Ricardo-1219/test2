@@ -672,3 +672,246 @@ void MainWindow::closeEvent(QCloseEvent *event)
         event->ignore();
     }
 }
+
+void MainWindow::addTestResult(QStringList *results,
+                               const QString &name,
+                               bool passed,
+                               const QString &details)
+{
+    results->append(QStringLiteral("%1\t%2\t%3")
+                        .arg(passed ? QStringLiteral("PASS")
+                                    : QStringLiteral("FAIL"),
+                             name,
+                             details));
+}
+
+void MainWindow::captureWidget(QWidget *widget,
+                               const QString &filePath,
+                               const QString &title,
+                               QStringList *results)
+{
+    widget->show();
+    widget->raise();
+    QApplication::processEvents(QEventLoop::AllEvents, 150);
+    const QPixmap image = widget->grab();
+    const bool saved = image.save(filePath, "PNG");
+    addTestResult(results,
+                  title,
+                  saved && !image.isNull(),
+                  filePath);
+}
+
+bool MainWindow::runSelfTest(const QString &outputDirectory)
+{
+    QStringList results;
+    const QDir output(outputDirectory);
+
+    newFile();
+    const QString sample =
+        QStringLiteral(
+            "小牛文本编辑器功能测试\n"
+            "Qt application development\n"
+            "查找目标：alpha   替换目标：beta\n"
+            "alpha beta alpha\n"
+            "第三行：中文、English、12345。\n");
+    {
+        const QSignalBlocker blocker(m_editor);
+        m_editor->setPlainText(sample);
+    }
+    m_editor->moveCursor(QTextCursor::Start);
+    m_editor->setFocus();
+    setModifiedState(true);
+    updateStatusBar();
+
+    const QString validPath = output.filePath(QStringLiteral("自动测试文本.txt"));
+    const bool saved = saveToFile(validPath, false);
+    QFile validFile(validPath);
+    const bool readBack = validFile.open(QIODevice::ReadOnly)
+        && QString::fromUtf8(validFile.readAll()) == sample;
+    validFile.close();
+    addTestResult(&results,
+                  QStringLiteral("保存与读回"),
+                  saved && readBack && !m_modified,
+                  validPath);
+
+    m_editor->moveCursor(QTextCursor::End);
+    m_editor->insertPlainText(QStringLiteral("触发修改状态"));
+    const QString modifiedSample = m_editor->toPlainText();
+    addTestResult(&results,
+                  QStringLiteral("修改状态与窗口标题"),
+                  m_modified && isWindowModified(),
+                  displayFileName());
+
+    const bool modifiedSaved = saveToFile(validPath, false);
+    const bool opened = openFile(validPath, false);
+    addTestResult(&results,
+                  QStringLiteral("重新打开文本文件"),
+                  modifiedSaved && opened
+                      && m_editor->toPlainText() == modifiedSample
+                      && !m_modified,
+                  validPath);
+
+    const QString missingPath = output.filePath(QStringLiteral("不存在.txt"));
+    const bool missingRejected = !openFile(missingPath, false);
+    addTestResult(&results,
+                  QStringLiteral("打开不存在文件"),
+                  missingRejected,
+                  missingPath);
+
+    const QString binaryPath = output.filePath(QStringLiteral("二进制异常.bin"));
+    QFile binaryFile(binaryPath);
+    if (binaryFile.open(QIODevice::WriteOnly)) {
+        binaryFile.write(QByteArray("abc\0def", 7));
+        binaryFile.close();
+    }
+    const bool binaryRejected = !openFile(binaryPath, false);
+    addTestResult(&results,
+                  QStringLiteral("拒绝二进制文件"),
+                  binaryRejected,
+                  binaryPath);
+
+    {
+        const QSignalBlocker blocker(m_editor);
+        m_editor->setPlainText(QStringLiteral("alpha beta alpha"));
+        m_editor->moveCursor(QTextCursor::Start);
+    }
+    const bool firstFind = findNext(QStringLiteral("alpha"), true, false, false);
+    const bool firstMatch = m_editor->textCursor().selectedText()
+        == QStringLiteral("alpha");
+    const bool secondFind = findNext(QStringLiteral("alpha"), true, false, false);
+    const int firstEnd = m_editor->textCursor().selectionEnd();
+    addTestResult(&results,
+                  QStringLiteral("连续查找与循环"),
+                  firstFind && firstMatch && secondFind
+                      && firstEnd > QStringLiteral("alpha").size(),
+                  QStringLiteral("position=%1").arg(firstEnd));
+
+    {
+        const QSignalBlocker blocker(m_editor);
+        m_editor->setPlainText(QStringLiteral("one two one"));
+    }
+    const int replacementCount = replaceAll(
+        QStringLiteral("one"), QStringLiteral("1"), true);
+    addTestResult(&results,
+                  QStringLiteral("替换全部"),
+                  replacementCount == 2
+                      && m_editor->toPlainText() == QStringLiteral("1 two 1"),
+                  QStringLiteral("count=%1").arg(replacementCount));
+
+    const bool undoAvailable = m_editor->document()->isUndoAvailable();
+    m_editor->undo();
+    const bool undoWorked =
+        m_editor->toPlainText() == QStringLiteral("one two one");
+    m_editor->redo();
+    const bool redoWorked =
+        m_editor->toPlainText() == QStringLiteral("1 two 1");
+    addTestResult(&results,
+                  QStringLiteral("撤销与重做"),
+                  undoAvailable && undoWorked && redoWorked,
+                  QStringLiteral("undo=%1, redo=%2")
+                      .arg(undoWorked)
+                      .arg(redoWorked));
+
+    QTextCursor selection = m_editor->textCursor();
+    selection.select(QTextCursor::Document);
+    m_editor->setTextCursor(selection);
+    updateActionStates();
+    addTestResult(&results,
+                  QStringLiteral("剪切复制 Action 使能"),
+                  ui->actionCut->isEnabled()
+                      && ui->actionCopy->isEnabled(),
+                  QStringLiteral("cut=%1, copy=%2")
+                      .arg(ui->actionCut->isEnabled())
+                      .arg(ui->actionCopy->isEnabled()));
+    m_editor->moveCursor(QTextCursor::End);
+
+    const bool invalidSaveRejected =
+        !saveToFile(output.absolutePath(), false);
+    addTestResult(&results,
+                  QStringLiteral("异常保存路径"),
+                  invalidSaveRejected,
+                  output.absolutePath());
+
+    setLineNumbersEnabled(false);
+    const bool lineNumbersHidden = !m_editor->lineNumbersVisible();
+    setLineNumbersEnabled(true);
+    setWordWrapEnabled(false);
+    const bool wrapDisabled =
+        m_editor->lineWrapMode() == QPlainTextEdit::NoWrap;
+    setWordWrapEnabled(true);
+    addTestResult(&results,
+                  QStringLiteral("行号与自动换行切换"),
+                  lineNumbersHidden
+                      && m_editor->lineNumbersVisible()
+                      && wrapDisabled
+                      && m_editor->lineWrapMode() == QPlainTextEdit::WidgetWidth,
+                  QStringLiteral("lineNumbers=on, wrap=on"));
+
+    {
+        const QSignalBlocker blocker(m_editor);
+        m_editor->setPlainText(sample);
+        m_editor->moveCursor(QTextCursor::Start);
+    }
+    setCurrentFile(validPath);
+    setModifiedState(false);
+    updateStatusBar();
+    resize(1180, 760);
+    captureWidget(this,
+                  output.filePath(QStringLiteral("主窗口.png")),
+                  QStringLiteral("主窗口运行截图"),
+                  &results);
+
+    showFindDialog();
+    if (m_findDialog) {
+        m_findDialog->setFindText(QStringLiteral("alpha"));
+        captureWidget(m_findDialog,
+                      output.filePath(QStringLiteral("查找对话框.png")),
+                      QStringLiteral("查找对话框截图"),
+                      &results);
+        m_findDialog->hide();
+    }
+
+    showReplaceDialog();
+    if (m_replaceDialog) {
+        m_replaceDialog->setFindText(QStringLiteral("alpha"));
+        captureWidget(m_replaceDialog,
+                      output.filePath(QStringLiteral("替换对话框.png")),
+                      QStringLiteral("替换对话框截图"),
+                      &results);
+        m_replaceDialog->hide();
+    }
+
+    showAboutDialog();
+    if (m_aboutDialog) {
+        captureWidget(m_aboutDialog,
+                      output.filePath(QStringLiteral("关于对话框.png")),
+                      QStringLiteral("关于对话框截图"),
+                      &results);
+        m_aboutDialog->hide();
+    }
+
+    const bool allPassed =
+        std::all_of(results.cbegin(), results.cend(), [](const QString &line) {
+            return line.startsWith(QStringLiteral("PASS"));
+        });
+
+    QFile report(output.filePath(QStringLiteral("自动测试报告.txt")));
+    if (report.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        const QString header =
+            QStringLiteral(
+                "小牛文本编辑器自动测试报告\n"
+                "测试时间：%1\n"
+                "结果：%2\n"
+                "格式：状态<TAB>项目<TAB>详情\n\n")
+                .arg(QDateTime::currentDateTime().toString(
+                         QStringLiteral("yyyy-MM-dd HH:mm:ss")),
+                     allPassed ? QStringLiteral("全部通过")
+                               : QStringLiteral("存在失败"));
+        report.write(header.toUtf8());
+        report.write(results.join(QLatin1Char('\n')).toUtf8());
+        report.write("\n");
+        report.close();
+    }
+
+    return allPassed;
+}
